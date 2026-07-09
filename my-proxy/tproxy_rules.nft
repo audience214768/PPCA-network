@@ -1,0 +1,18 @@
+flush ruleset
+
+table ip my_tproxy {
+    chain prerouting_chain {
+        type filter hook prerouting priority 0; policy accept;
+        meta mark 1 ip protocol tcp tproxy to :12345 accept
+    }
+
+    chain output_chain {
+        type route hook output priority 0; policy accept;
+
+        meta skuid 0 accept
+
+        ip daddr {127.0.0.0/8, 10.0.0.0/8, 192.168.0.0/16 } accept
+
+        tcp dport 80 meta mark set 1 accept
+    }
+}

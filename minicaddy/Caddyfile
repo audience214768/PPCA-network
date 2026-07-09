@@ -1,0 +1,35 @@
+# Sample minicaddy config
+
+# A static site with logging + gzip on port 8080.
+:8080 {
+    root ./www
+    file_server
+    gzip
+    log
+}
+
+# Virtual hosts on port 8080.
+vh.localhost:8080 {
+    root ./sites/vh
+    file_server
+}
+
+api.localhost:8080 {
+    reverse_proxy 127.0.0.1:9000
+}
+
+# A reverse proxy in front of an upstream, rate-limited and behind basic auth.
+:8081 {
+    reverse_proxy 127.0.0.1:9000
+    basic_auth admin secret "Staging"
+    rate_limit 20 40
+    log
+}
+
+# Automatic HTTPS via ACME. Point ACME_DIRECTORY at Pebble to test:
+#   ACME_DIRECTORY=https://localhost:14000/dir ACME_INSECURE=1 minicaddy
+# example.localhost {
+#     root ./www
+#     file_server
+#     tls acme admin@example.com
+# }

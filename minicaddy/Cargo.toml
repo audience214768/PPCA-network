@@ -1,0 +1,12 @@
+[package]
+name = "minicaddy"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+tokio = { version = "1", features = ["full"] }
+httparse = "1"
+flate2 = "1"
+base64 = "0.22"
+libc = "0.2"
