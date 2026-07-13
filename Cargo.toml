@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "my-proxy",
+    "minicaddy",
+    "toolkit/ping",
+    "toolkit/traceroute",
+    "toolkit/dnsresolver",
+]
+
+resolver = "3"

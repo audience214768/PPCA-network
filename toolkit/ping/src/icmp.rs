@@ -8,7 +8,6 @@ pub fn build_echo_request(id: u16, seq: u16, payload: &[u8]) -> Vec<u8> {
 
     buf[0] = ICMP_ECHO_REQUEST;
     buf[1] = 0; // Code
-    // buf[2..4] = checksum (filled below)
     buf[4..6].copy_from_slice(&id.to_be_bytes());
     buf[6..8].copy_from_slice(&seq.to_be_bytes());
     buf[8..].copy_from_slice(payload);
@@ -26,7 +25,6 @@ pub fn parse_echo_reply(data: &[u8]) -> Option<(u16, u16, &[u8])> {
     if data[0] != ICMP_ECHO_REPLY {
         return None;
     }
-    // Code should be 0, but we don't reject non-zero here.
     let id = u16::from_be_bytes([data[4], data[5]]);
     let seq = u16::from_be_bytes([data[6], data[7]]);
     let payload = &data[ICMP_HEADER_SIZE..];
@@ -42,12 +40,10 @@ pub fn checksum(data: &[u8]) -> u16 {
         i += 2;
     }
 
-    // Odd-length tail — pad with zero low byte.
     if i < data.len() {
         sum += (data[i] as u32) << 8;
     }
 
-    // Fold carries.
     while sum >> 16 != 0 {
         sum = (sum & 0xFFFF) + (sum >> 16);
     }

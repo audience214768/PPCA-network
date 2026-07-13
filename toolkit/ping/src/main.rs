@@ -2,17 +2,18 @@ mod config;
 mod icmp;
 mod stats;
 
+use std::collections::HashMap;
 use std::io;
 use std::mem::MaybeUninit;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::process;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::thread::sleep;
+use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
-use socket2::{Domain, Protocol, Socket, SockAddr, Type};
+use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 
 use config::Config;
 use icmp::{build_echo_request, parse_echo_reply};
@@ -21,118 +22,150 @@ use stats::RttStats;
 fn main() {
     let config = Config::parse();
 
-    let target = match resolve_host(&config.host) {
-        Ok(addr) => addr,
-        Err(e) => {
-            eprintln!("ping: {}: {}", config.host, e);
-            process::exit(2);
-        }
-    };
+    let target = resolve_host(&config.host).unwrap_or_else(|e| {
+        eprintln!("ping: {}: {}", config.host, e);
+        process::exit(2);
+    });
     let resolved_ip = target.ip().to_string();
 
-    let sock_type: Type = (libc::SOCK_RAW as i32).into();
-    let socket = match Socket::new(Domain::IPV4, sock_type, Some(Protocol::ICMPV4)) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("ping: failed to create raw socket: {e}");
-            process::exit(1);
-        }
-    };
-
-    if let Err(e) = socket.set_read_timeout(Some(Duration::from_secs_f64(config.timeout))) {
-        eprintln!("ping: set_read_timeout failed: {e}");
+    let sock = Socket::new(
+        Domain::IPV4,
+        Type::from(libc::SOCK_RAW),
+        Some(Protocol::ICMPV4),
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("ping: failed to create raw socket: {e}");
+        eprintln!("(try running with sudo)");
         process::exit(1);
-    }
+    });
+    let recv_sock = sock.try_clone().unwrap_or_else(|e| {
+        eprintln!("ping: failed to clone socket: {e}");
+        process::exit(1);
+    });
+
     let id = (process::id() & 0xFFFF) as u16;
-
     let payload = vec![0u8; config.size];
-
     let running = Arc::new(AtomicBool::new(true));
-    let r = running.clone();
+    let _ = ctrlc_handler(running.clone());
 
     println!(
         "PING {} ({}): {} data bytes",
-        config.host,
-        resolved_ip,
-        config.size
+        config.host, resolved_ip, config.size
     );
 
-    let mut stats = RttStats::new();
-    let mut seq: u16 = 0;
     let target_addr = SockAddr::from(target);
+    let interval = Duration::from_secs_f64(config.interval);
+    let timeout = Duration::from_secs_f64(config.timeout);
 
-    while running.load(Ordering::Relaxed) {
-        if let Some(c) = config.count {
-            if stats.sent >= c {
+    let sent_times: Arc<Mutex<HashMap<u16, Instant>>> = Arc::new(Mutex::new(HashMap::new()));
+    let stats = Arc::new(Mutex::new(RttStats::new()));
+
+    // ── Receiver thread ──
+    let recv_running = running.clone();
+    let recv_times = sent_times.clone();
+    let recv_stats = stats.clone();
+    let recv_handle = thread::spawn(move || {
+        recv_sock
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .ok();
+
+        loop {
+            let active = recv_running.load(Ordering::Relaxed);
+            let have_inflight = !recv_times.lock().unwrap().is_empty();
+
+            if !active && !have_inflight {
                 break;
             }
-        }
 
-        // Build and send.
-        let packet = build_echo_request(id, seq, &payload);
-        let sent_at = Instant::now();
+            let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
+            match recv_sock.recv_from(&mut buf) {
+                Ok((n, from)) => {
+                    let data: &[u8] =
+                        unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const u8, n) };
+                    let ip_hdr_len = ((data[0] & 0x0F) as usize) * 4;
 
-        if let Err(e) = socket.send_to(&packet, &target_addr) {
-            eprintln!("ping: sendto: {e}");
-            break;
-        }
-        stats.sent += 1;
-
-        // Receive. socket2 0.6 uses MaybeUninit<u8>.
-        let mut buf: [MaybeUninit<u8>; 1024] = unsafe { MaybeUninit::uninit().assume_init() };
-        match socket.recv_from(&mut buf) {
-            Ok((n, from)) => {
-                let rtt = sent_at.elapsed().as_secs_f64() * 1000.0;
-
-                // SAFETY: `n` bytes are initialized.
-                let data: &[u8] = unsafe {
-                    std::slice::from_raw_parts(buf.as_ptr() as *const u8, n)
-                };
-
-                // IP header length in 32-bit words (IHL = low nibble of byte 0).
-                let ip_header_len = ((data[0] & 0x0F) as usize) * 4;
-                if n >= ip_header_len + 8 {
-                    if let Some((rid, rseq, _reply_payload)) =
-                        parse_echo_reply(&data[ip_header_len..])
-                    {
+                    if let Some((rid, rseq, _)) = parse_echo_reply(&data[ip_hdr_len..]) {
                         if rid == id {
-                            let ttl = data[8];
-                            let data_len = n - ip_header_len;
-                            println!(
-                                "{} bytes from {}: icmp_seq={} ttl={} time={:.2} ms",
-                                data_len, from.as_socket_ipv4().unwrap(), rseq, ttl, rtt
-                            );
-                            stats.record(rtt);
+                            let mut times = recv_times.lock().unwrap();
+                            if let Some(sent_at) = times.remove(&rseq) {
+                                let rtt = sent_at.elapsed().as_secs_f64() * 1000.0;
+                                println!(
+                                    "{} bytes from {}: icmp_seq={} ttl={} time={:.2} ms",
+                                    n - ip_hdr_len,
+                                    from.as_socket().unwrap(),
+                                    rseq,
+                                    data[8],
+                                    rtt,
+                                );
+                                recv_stats.lock().unwrap().record(rtt);
+                            }
                         }
                     }
                 }
+                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {}
+                Err(e) => {
+                    eprintln!("ping: recvfrom: {e}");
+                    break;
+                }
             }
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                println!("Request timeout for icmp_seq {seq}");
-            }
-            Err(e) => {
-                eprintln!("ping: recvfrom: {e}");
+        }
+    });
+
+    // ── Sender (main thread) ──
+    let mut seq: u16 = 0;
+    let mut next_send = Instant::now();
+
+    loop {
+        if !running.load(Ordering::Relaxed) {
+            break;
+        }
+        if let Some(c) = config.count {
+            if stats.lock().unwrap().sent >= c {
                 break;
             }
         }
 
+        let packet = build_echo_request(id, seq, &payload);
+        if sock.send_to(&packet, &target_addr).is_err() {
+            break;
+        }
+
+        sent_times.lock().unwrap().insert(seq, Instant::now());
+        stats.lock().unwrap().sent += 1;
         seq = seq.wrapping_add(1);
 
-        if running.load(Ordering::Relaxed) {
-            if let Some(c) = config.count {
-                if stats.sent >= c {
-                    break;
-                }
-            }
-            sleep(Duration::from_secs_f64(config.interval));
+        next_send += interval;
+        let now = Instant::now();
+        if next_send > now {
+            thread::sleep(next_send - now);
+        } else {
+            next_send = now;
         }
     }
 
-    // ── Summary ─────────────────────────────────────────────────
-    stats.print_summary(&config.host, &resolved_ip);
+    // Wait for late replies, then signal receiver to stop.
+    thread::sleep(timeout);
+    running.store(false, Ordering::SeqCst);
+
+    // Give receiver one final chance to drain naturally.
+    thread::sleep(Duration::from_millis(200));
+
+    // Report any remaining unreplied probes.
+    {
+        let mut times = sent_times.lock().unwrap();
+        let mut seqs: Vec<u16> = times.keys().copied().collect();
+        seqs.sort();
+        for rseq in seqs {
+            println!("Request timeout for icmp_seq {}", rseq);
+        }
+        times.clear();
+    }
+
+    recv_handle.join().unwrap();
+
+    stats.lock().unwrap().print_summary(&config.host, &resolved_ip);
 }
 
-/// Resolve a hostname to a `SocketAddr`. Returns the first IPv4 result.
 fn resolve_host(host: &str) -> io::Result<SocketAddr> {
     if let Ok(ip) = host.parse::<std::net::Ipv4Addr>() {
         return Ok(SocketAddr::new(ip.into(), 0));
@@ -146,7 +179,8 @@ fn resolve_host(host: &str) -> io::Result<SocketAddr> {
 
 fn ctrlc_handler(running: Arc<AtomicBool>) -> Result<(), ()> {
     unsafe {
-        let prev = libc::signal(libc::SIGINT, sigint_handler as *const () as libc::sighandler_t);
+        let prev =
+            libc::signal(libc::SIGINT, sigint_handler as *const () as libc::sighandler_t);
         if prev == libc::SIG_ERR {
             return Err(());
         }
