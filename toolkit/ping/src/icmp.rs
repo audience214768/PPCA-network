@@ -7,7 +7,7 @@ pub fn build_echo_request(id: u16, seq: u16, payload: &[u8]) -> Vec<u8> {
     let mut buf = vec![0u8; len];
 
     buf[0] = ICMP_ECHO_REQUEST;
-    buf[1] = 0; // Code
+    buf[1] = 0; 
     buf[4..6].copy_from_slice(&id.to_be_bytes());
     buf[6..8].copy_from_slice(&seq.to_be_bytes());
     buf[8..].copy_from_slice(payload);

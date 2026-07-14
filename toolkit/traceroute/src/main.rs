@@ -91,8 +91,9 @@ fn run_udp(config: &Config, target: SocketAddr) -> io::Result<()> {
         }
     }
 
+    let mut unreceived = total;
     let global_deadline = Instant::now() + Duration::from_secs_f64(config.timeout);
-    while probes.iter().any(|p| !p.received) && Instant::now() < global_deadline {
+    while unreceived > 0 && Instant::now() < global_deadline {
         let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
         match recv_sock.recv_from(&mut buf) {
             Ok((n, from)) => {
@@ -107,6 +108,7 @@ fn run_udp(config: &Config, target: SocketAddr) -> io::Result<()> {
                         if probe.marker == dst_port && !probe.received {
                             probe.rtt_ms = probe.sent_at.elapsed().as_secs_f64() * 1000.0;
                             probe.received = true;
+                            unreceived -= 1;
                             let ip = from.as_socket().unwrap().ip();
                             if hop_addrs[probe.ttl as usize].is_none() {
                                 hop_addrs[probe.ttl as usize] = Some(ip);
@@ -131,7 +133,6 @@ fn run_udp(config: &Config, target: SocketAddr) -> io::Result<()> {
         }
     }
 
-    // ── Phase 3: PRINT in TTL order, stop at target ──
     for ttl in config.first_ttl..=config.max_hops {
         let hop_probes: Vec<&Probe> = probes.iter().filter(|p| p.ttl == ttl).collect();
         let addr = hop_addrs[ttl as usize].map(|ip| SocketAddr::new(ip, 0));
@@ -166,7 +167,6 @@ fn run_icmp(config: &Config, target: SocketAddr) -> io::Result<()> {
     let mut hop_addrs: Vec<Option<IpAddr>> = vec![None; (config.max_hops + 1) as usize];
     let mut target_reached_at: Option<u8> = None;
 
-    // ── Phase 1: SEND all probes for all TTLs ──
     let mut global_seq: u16 = 0;
     for ttl in config.first_ttl..=config.max_hops {
         sock.set_ttl_v4(ttl as u32)?;
@@ -179,9 +179,9 @@ fn run_icmp(config: &Config, target: SocketAddr) -> io::Result<()> {
         }
     }
 
-    // ── Phase 2: RECV with global deadline ──
+    let mut unreceived = total;
     let global_deadline = Instant::now() + Duration::from_secs_f64(config.timeout);
-    while probes.iter().any(|p| !p.received) && Instant::now() < global_deadline {
+    while unreceived > 0 && Instant::now() < global_deadline {
         let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
         match sock.recv_from(&mut buf) {
             Ok((n, from)) => {
@@ -198,6 +198,7 @@ fn run_icmp(config: &Config, target: SocketAddr) -> io::Result<()> {
                                 probe.rtt_ms =
                                     probe.sent_at.elapsed().as_secs_f64() * 1000.0;
                                 probe.received = true;
+                                unreceived -= 1;
                                 let ip = from.as_socket().unwrap().ip();
                                 if hop_addrs[probe.ttl as usize].is_none() {
                                     hop_addrs[probe.ttl as usize] = Some(ip);
@@ -220,6 +221,7 @@ fn run_icmp(config: &Config, target: SocketAddr) -> io::Result<()> {
                                 probe.rtt_ms =
                                     probe.sent_at.elapsed().as_secs_f64() * 1000.0;
                                 probe.received = true;
+                                unreceived -= 1;
                                 let ip = from.as_socket().unwrap().ip();
                                 if hop_addrs[probe.ttl as usize].is_none() {
                                     hop_addrs[probe.ttl as usize] = Some(ip);

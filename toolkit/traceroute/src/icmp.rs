@@ -40,7 +40,6 @@ pub fn parse_echo_reply(data: &[u8]) -> Option<(u16, u16, &[u8])> {
     Some((id, seq, payload))
 }
 
-/// RFC 1071 one's complement checksum.
 pub fn checksum(data: &[u8]) -> u16 {
     let mut sum: u32 = 0;
     let mut i = 0;

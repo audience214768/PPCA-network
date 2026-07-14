@@ -4,7 +4,7 @@ members = [
     "minicaddy",
     "toolkit/ping",
     "toolkit/traceroute",
-    "toolkit/dnsresolver",
+    "toolkit/dnsresolver", "TCP-stack",
 ]
 
 resolver = "3"

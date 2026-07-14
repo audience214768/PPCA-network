@@ -60,7 +60,6 @@ fn main() {
     let sent_times: Arc<Mutex<HashMap<u16, Instant>>> = Arc::new(Mutex::new(HashMap::new()));
     let stats = Arc::new(Mutex::new(RttStats::new()));
 
-    // ── Receiver thread ──
     let recv_running = running.clone();
     let recv_times = sent_times.clone();
     let recv_stats = stats.clone();
@@ -69,14 +68,7 @@ fn main() {
             .set_read_timeout(Some(Duration::from_millis(100)))
             .ok();
 
-        loop {
-            let active = recv_running.load(Ordering::Relaxed);
-            let have_inflight = !recv_times.lock().unwrap().is_empty();
-
-            if !active && !have_inflight {
-                break;
-            }
-
+        while recv_running.load(Ordering::Relaxed) {
             let mut buf = [MaybeUninit::<u8>::uninit(); 1024];
             match recv_sock.recv_from(&mut buf) {
                 Ok((n, from)) => {
@@ -143,25 +135,18 @@ fn main() {
         }
     }
 
-    // Wait for late replies, then signal receiver to stop.
     thread::sleep(timeout);
     running.store(false, Ordering::SeqCst);
+    recv_handle.join().unwrap();
 
-    // Give receiver one final chance to drain naturally.
-    thread::sleep(Duration::from_millis(200));
-
-    // Report any remaining unreplied probes.
     {
-        let mut times = sent_times.lock().unwrap();
+        let times = sent_times.lock().unwrap();
         let mut seqs: Vec<u16> = times.keys().copied().collect();
         seqs.sort();
         for rseq in seqs {
             println!("Request timeout for icmp_seq {}", rseq);
         }
-        times.clear();
     }
-
-    recv_handle.join().unwrap();
 
     stats.lock().unwrap().print_summary(&config.host, &resolved_ip);
 }
