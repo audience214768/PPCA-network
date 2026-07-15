@@ -12,14 +12,14 @@ pub const ICMP_ECHO_REPLY: u8 = 0;
 
 #[derive(Debug)]
 pub struct Ipv4Header {
-    pub version_ihl: u8,   // 0x45 for version=4, IHL=5
-    pub dscp_ecn: u8,
-    pub total_len: u16,
-    pub id: u16,
-    pub flags_frag: u16,    // 0x4000 = DF set
-    pub ttl: u8,
+    pub _version_ihl: u8,   // 0x45 for version=4, IHL=5
+    pub _dscp_ecn: u8,
+    pub _total_len: u16,
+    pub _id: u16,
+    pub _flags_frag: u16,    // 0x4000 = DF set
+    pub _ttl: u8,
     pub protocol: u8,
-    pub checksum: u16,
+    pub _checksum: u16,
     pub src: [u8; 4],
     pub dst: [u8; 4],
 }
@@ -36,8 +36,8 @@ pub fn parse_ipv4(data: &[u8]) -> Option<(Ipv4Header, &[u8])> {
     }
 
     // Verify header checksum
-    let csum = u16::from_be_bytes([data[10], data[11]]);
-    if csum != 0 && !verify_ip_checksum(&data[..ihl]) {
+    let checksum = u16::from_be_bytes([data[10], data[11]]);
+    if checksum != 0 && !verify_ip_checksum(&data[..ihl]) {
         return None;
     }
 
@@ -48,14 +48,14 @@ pub fn parse_ipv4(data: &[u8]) -> Option<(Ipv4Header, &[u8])> {
 
     Some((
         Ipv4Header {
-            version_ihl,
-            dscp_ecn: data[1],
-            total_len: u16::from_be_bytes([data[2], data[3]]),
-            id: u16::from_be_bytes([data[4], data[5]]),
-            flags_frag: u16::from_be_bytes([data[6], data[7]]),
-            ttl: data[8],
+            _version_ihl: version_ihl,
+            _dscp_ecn: data[1],
+            _total_len: u16::from_be_bytes([data[2], data[3]]),
+            _id: u16::from_be_bytes([data[4], data[5]]),
+            _flags_frag: u16::from_be_bytes([data[6], data[7]]),
+            _ttl: data[8],
             protocol: data[9],
-            checksum: csum,
+            _checksum: checksum,
             src,
             dst,
         },
@@ -138,12 +138,12 @@ mod tests {
             64,
             b"HELLO",
         );
-        let (hdr, payload) = parse_ipv4(&pkt).expect("should parse");
-        assert_eq!(hdr.version_ihl, 0x45);
-        assert_eq!(hdr.protocol, IP_PROTO_ICMP);
-        assert_eq!(hdr.ttl, 64);
-        assert_eq!(hdr.src, [10, 0, 0, 2]);
-        assert_eq!(hdr.dst, [10, 0, 0, 1]);
+        let (header, payload) = parse_ipv4(&pkt).expect("should parse");
+        assert_eq!(header._version_ihl, 0x45);
+        assert_eq!(header.protocol, IP_PROTO_ICMP);
+        assert_eq!(header._ttl, 64);
+        assert_eq!(header.src, [10, 0, 0, 2]);
+        assert_eq!(header.dst, [10, 0, 0, 1]);
         assert_eq!(payload, b"HELLO");
         // Self-validate: checksum should be zero after insertion
         let cs = u16::from_be_bytes([pkt[10], pkt[11]]);

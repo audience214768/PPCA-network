@@ -112,9 +112,13 @@ run_p6() {
     echo "  sudo iptables -A FORWARD -i $TAP -o eth0 -j ACCEPT"
     echo "  sudo iptables -A FORWARD -i eth0 -o $TAP -m state --state ESTABLISHED,RELATED -j ACCEPT"
     echo ""
+    info "This requires a local HTTP server on the other side."
+    info "For testing, run in another shell: python3 -m http.server 8000 -b 10.0.0.1"
+    info "Then the stack will connect to 10.0.0.1:8000 and send a GET request."
+    echo ""
     setup_tap
     cd /Users/audience/program/PPCA/network
-    cargo run -p TCP-stack -- "$TAP" --ip "$STACK_IP" --connect "93.184.216.34:80"
+    cargo run -p TCP-stack -- "$TAP" --ip "$STACK_IP" --connect "${1:-10.0.0.1:8000}"
 }
 
 PHASE="${1:-p1}"

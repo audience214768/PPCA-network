@@ -18,14 +18,14 @@ const MAX_RETRIES: u32 = 3;
 
 #[derive(Debug)]
 pub struct ArpPacket {
-    pub htype: u16,
-    pub ptype: u16,
-    pub hlen: u8,
-    pub plen: u8,
+    pub _htype: u16,
+    pub _ptype: u16,
+    pub _hlen: u8,
+    pub _plen: u8,
     pub oper: u16,
     pub sha: [u8; 6], // sender hardware address
     pub spa: [u8; 4], // sender protocol address
-    pub tha: [u8; 6], // target hardware address
+    pub _tha: [u8; 6], // target hardware address
     pub tpa: [u8; 4], // target protocol address
 }
 
@@ -42,14 +42,14 @@ pub fn parse_arp(data: &[u8]) -> Option<ArpPacket> {
     tha.copy_from_slice(&data[18..24]);
     tpa.copy_from_slice(&data[24..28]);
     Some(ArpPacket {
-        htype: u16::from_be_bytes([data[0], data[1]]),
-        ptype: u16::from_be_bytes([data[2], data[3]]),
-        hlen: data[4],
-        plen: data[5],
+        _htype: u16::from_be_bytes([data[0], data[1]]),
+        _ptype: u16::from_be_bytes([data[2], data[3]]),
+        _hlen: data[4],
+        _plen: data[5],
         oper: u16::from_be_bytes([data[6], data[7]]),
         sha,
         spa,
-        tha,
+        _tha: tha,
         tpa,
     })
 }
@@ -141,7 +141,6 @@ impl ArpCache {
         }
     }
 
-    /// Look up MAC address for an IP. Returns None if not found or expired.
     pub fn lookup(&self, ip: [u8; 4]) -> Option<[u8; 6]> {
         let entry = self.entries.get(&ip)?;
         if entry.expires < Instant::now() {
@@ -175,12 +174,6 @@ impl ArpCache {
         );
     }
 
-    /// Check if we need to send an ARP request for this IP (no cache, no pending).
-    pub fn needs_resolution(&self, ip: [u8; 4]) -> bool {
-        self.lookup(ip).is_none() && !self.pending.contains_key(&ip)
-    }
-
-    /// Queue an IP packet waiting for ARP resolution.
     /// Returns true if this is the first packet for this IP (caller should send ARP request).
     pub fn queue_packet(&mut self, ip: [u8; 4], packet: Vec<u8>, now: Instant) -> bool {
         let is_new = !self.pending.contains_key(&ip);
@@ -252,8 +245,8 @@ mod tests {
             [10, 0, 0, 2],
         );
         let parsed = parse_arp(&pkt).expect("should parse");
-        assert_eq!(parsed.htype, ARP_HTYPE_ETHER);
-        assert_eq!(parsed.ptype, ARP_PTYPE_IPV4);
+        assert_eq!(parsed._htype, ARP_HTYPE_ETHER);
+        assert_eq!(parsed._ptype, ARP_PTYPE_IPV4);
         assert_eq!(parsed.oper, ARP_OP_REQUEST);
         assert_eq!(parsed.sha, [0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
         assert_eq!(parsed.spa, [10, 0, 0, 1]);
@@ -289,13 +282,6 @@ mod tests {
     }
 
     #[test]
-    fn test_needs_resolution() {
-        let cache = ArpCache::new();
-        assert!(cache.needs_resolution([10, 0, 0, 1]));
-        assert!(cache.lookup([10, 0, 0, 1]).is_none());
-    }
-
-    #[test]
     fn test_build_reply() {
         let reply = build_arp_reply(
             [0x11, 0x22, 0x33, 0x44, 0x55, 0x66],
@@ -307,7 +293,7 @@ mod tests {
         assert_eq!(parsed.oper, ARP_OP_REPLY);
         assert_eq!(parsed.sha, [0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
         assert_eq!(parsed.spa, [10, 0, 0, 2]);
-        assert_eq!(parsed.tha, [0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
+        assert_eq!(parsed._tha, [0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
         assert_eq!(parsed.tpa, [10, 0, 0, 1]);
     }
 

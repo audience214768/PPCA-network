@@ -14,7 +14,7 @@ const IFF_NO_PI: libc::c_short = 0x1000;
 
 pub struct TapDevice {
     fd: OwnedFd,
-    pub name: String,
+    pub _name: String,
     pub mac: [u8; 6],
 }
 
@@ -41,11 +41,22 @@ impl TapDevice {
         let raw = file.into_raw_fd();
         let owned = unsafe { OwnedFd::from_raw_fd(raw) };
 
+        // Set non-blocking
+        let fd = owned.as_raw_fd();
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+        if flags < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let ret = unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) };
+        if ret < 0 {
+            return Err(io::Error::last_os_error());
+        }
+
         let mac = Self::read_mac(name).unwrap();
 
         Ok(Self {
             fd: owned,
-            name: name.to_string(),
+            _name: name.to_string(),
             mac,
         })
     }

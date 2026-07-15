@@ -17,7 +17,7 @@ pub fn parse_frame(data: &[u8]) -> Option<(EthernetHdr, &[u8])> {
     let ethertype = u16::from_be_bytes([data[12], data[13]]);
     Some((
         EthernetHdr {
-            dst,
+            _dst: dst,
             src,
             ethertype,
         },
@@ -36,7 +36,7 @@ pub fn build_frame(dst: [u8; 6], src: [u8; 6], ethertype: u16, payload: &[u8]) -
 
 #[derive(Debug)]
 pub struct EthernetHdr {
-    pub dst: [u8; 6],
+    pub _dst: [u8; 6],
     pub src: [u8; 6],
     pub ethertype: u16,
 }
@@ -50,7 +50,7 @@ mod tests {
         let payload = b"hello world";
         let frame = build_frame([0x01; 6], [0x02; 6], ETH_TYPE_IPV4, payload);
         let (hdr, pld) = parse_frame(&frame).expect("should parse");
-        assert_eq!(hdr.dst, [0x01; 6]);
+        assert_eq!(hdr._dst, [0x01; 6]);
         assert_eq!(hdr.src, [0x02; 6]);
         assert_eq!(hdr.ethertype, ETH_TYPE_IPV4);
         assert_eq!(pld, payload);
