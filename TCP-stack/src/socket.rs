@@ -1,19 +1,15 @@
-//! Socket API — client-side TCP: TcpSocket for connect/send/recv/close.
 
 use crate::tcp::{ConnKey, TcpManager, TcpState, OutgoingSegment};
 
-/// Handle to an established TCP connection.
 #[derive(Clone, Copy)]
 pub struct TcpSocket {
     pub key: ConnKey,
 }
 
-/// Read data from a socket.
 pub fn recv(manager: &mut TcpManager, sock: &TcpSocket) -> Vec<u8> {
     manager.drain_data(&sock.key)
 }
 
-/// Queue data for sending. Appends to send_buffer, returns OutgoingSegment(s).
 pub fn send(manager: &mut TcpManager, sock: &TcpSocket, data: &[u8]) -> Vec<OutgoingSegment> {
     let tcb = match manager.get_mut(&sock.key) {
         Some(t) => t,

@@ -642,11 +642,6 @@ impl TcpManager {
         }
     }
 
-    /// Check which connections have received data (for echo).
-
-    /// Find an established connection on the given local port.
-
-    /// Find the source port for a connection matching remote IP and port.
     pub fn find_src_port(&self, remote_ip: [u8; 4], remote_port: u16) -> Option<u16> {
         self.connections
             .iter()
@@ -703,8 +698,6 @@ impl TcpManager {
         )
     }
 
-    /// Iterate over all connections.
-
     fn next_ephemeral(&self) -> u16 {
         for port in 40000..60000 {
             if !self.connections.keys().any(|k| k.1 == port) {
@@ -716,7 +709,6 @@ impl TcpManager {
 
 }
 
-/// An outgoing TCP segment to be wrapped in IP and sent.
 #[derive(Debug)]
 pub struct OutgoingSegment {
     pub flags: u8,
@@ -726,7 +718,6 @@ pub struct OutgoingSegment {
     pub dst_port: u16,
 }
 
-// ── Helpers ──
 
 pub fn rand_seq() -> u32 {
     // Simple pseudo-random ISS based on time

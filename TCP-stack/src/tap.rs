@@ -61,7 +61,6 @@ impl TapDevice {
         })
     }
 
-    /// Read one Ethernet frame. Returns number of bytes read.
     pub fn read_frame(&self, buf: &mut [u8]) -> io::Result<usize> {
         let ret = unsafe {
             libc::read(
@@ -76,7 +75,6 @@ impl TapDevice {
         Ok(ret as usize)
     }
 
-    /// Write one Ethernet frame.
     pub fn write_frame(&self, data: &[u8]) -> io::Result<()> {
         let ret = unsafe {
             libc::write(

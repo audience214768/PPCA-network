@@ -100,6 +100,19 @@ fn main() {
                     break;
                 }
             }
+
+            // Report probes that have timed out.
+            let now = Instant::now();
+            let mut times = recv_times.lock().unwrap();
+            let timed_out: Vec<u16> = times
+                .iter()
+                .filter(|(_, sent_at)| now - **sent_at > timeout)
+                .map(|(seq, _)| *seq)
+                .collect();
+            for seq in timed_out {
+                times.remove(&seq);
+                println!("Request timeout for icmp_seq {}", seq);
+            }
         }
     });
 

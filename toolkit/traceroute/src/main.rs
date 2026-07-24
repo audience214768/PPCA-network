@@ -190,13 +190,11 @@ fn run_icmp(config: &Config, target: SocketAddr) -> io::Result<()> {
                 let ip_hdr_len = ((data[0] & 0x0F) as usize) * 4;
                 let icmp_body = &data[ip_hdr_len..];
 
-                // Case 1: Echo Reply → we reached the destination.
                 if let Some((rid, rseq, _)) = parse_echo_reply(icmp_body) {
                     if rid == id {
                         for probe in &mut probes {
                             if probe.marker == rseq && !probe.received {
-                                probe.rtt_ms =
-                                    probe.sent_at.elapsed().as_secs_f64() * 1000.0;
+                                probe.rtt_ms = probe.sent_at.elapsed().as_secs_f64() * 1000.0;
                                 probe.received = true;
                                 unreceived -= 1;
                                 let ip = from.as_socket().unwrap().ip();
@@ -210,16 +208,13 @@ fn run_icmp(config: &Config, target: SocketAddr) -> io::Result<()> {
                             }
                         }
                     }
-                } else if let Some((ICMP_TIME_EXCEEDED, 0, 1, transport)) =
-                    parse_icmp_error(icmp_body)
-                { // Case 2: Time Exceeded (Type 11, Code 0) from an intermediate router.
+                } else if let Some((ICMP_TIME_EXCEEDED, 0, 1, transport)) = parse_icmp_error(icmp_body) {
                     let inner_id = u16::from_be_bytes([transport[4], transport[5]]);
                     let inner_seq = u16::from_be_bytes([transport[6], transport[7]]);
                     if inner_id == id {
                         for probe in &mut probes {
                             if probe.marker == inner_seq && !probe.received {
-                                probe.rtt_ms =
-                                    probe.sent_at.elapsed().as_secs_f64() * 1000.0;
+                                probe.rtt_ms = probe.sent_at.elapsed().as_secs_f64() * 1000.0;
                                 probe.received = true;
                                 unreceived -= 1;
                                 let ip = from.as_socket().unwrap().ip();

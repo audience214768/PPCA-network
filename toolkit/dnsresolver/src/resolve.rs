@@ -56,10 +56,12 @@ fn resolve_iterative(
     let mut visited_ns = HashSet::new();
     let mut current_name = name.to_string();
     let mut cname_depth = 0;
+    let mut cname_chain: Vec<DnsRR> = Vec::new();
 
     for _iteration in 0..MAX_ITERATIONS {
         if let Some(rrs) = cache.get(&current_name, qtype, CLASS_IN) {
-            return Ok(rrs);
+            cname_chain.extend(rrs);
+            return Ok(cname_chain);
         }
 
         if verbose {
@@ -80,22 +82,24 @@ fn resolve_iterative(
         if !answers.is_empty() {
             let matching = extract_matching(&answers, qtype);
             if !matching.is_empty() {
-                return Ok(matching);
+                cname_chain.extend(matching);
+                return Ok(cname_chain);
             }
 
             if qtype != TYPE_CNAME {
-                if let Some(cname) = find_cname(&answers) {
+                if let Some(cname_rr) = find_cname(&answers) {
                     if cname_depth >= MAX_CNAME_DEPTH {
                         return Err("CNAME depth exceeded".into());
                     }
                     cname_depth += 1;
-                    current_name = cname;
-                    servers = find_nameservers(&current_name, &authorities, &additionals, cache)?;
+                    current_name = cname_target(&cname_rr).to_string();
+                    cname_chain.push(cname_rr);
+                    servers = get_nameservers(&current_name, cache)?;
                     continue;
                 }
             }
 
-            return Ok(matching);
+            return Ok(cname_chain);
         }
 
         if let Some(new_servers) =
@@ -264,15 +268,6 @@ fn extract_referral(
     Some(result)
 }
 
-fn find_nameservers(
-    name: &str,
-    _authorities: &[DnsRR],
-    _additionals: &[DnsRR],
-    cache: &DnsCache,
-) -> Result<Vec<(String, Ipv4Addr)>, String> {
-    get_nameservers(name, cache)
-}
-
 fn get_nameservers(name: &str, cache: &DnsCache) -> Result<Vec<(String, Ipv4Addr)>, String> {
     let mut labels: Vec<&str> = name.trim_end_matches('.').split('.').collect();
     labels.push("");
@@ -293,11 +288,15 @@ fn get_nameservers(name: &str, cache: &DnsCache) -> Result<Vec<(String, Ipv4Addr
     Err(format!("no NS records found for {name}"))
 }
 
-fn find_cname(rrs: &[DnsRR]) -> Option<String> {
-    rrs.iter().find_map(|rr| match &rr.rdata {
-        RData::CNAME(name) => Some(name.clone()),
-        _ => None,
-    })
+fn find_cname(rrs: &[DnsRR]) -> Option<DnsRR> {
+    rrs.iter().find(|rr| matches!(rr.rdata, RData::CNAME(_))).cloned()
+}
+
+fn cname_target(rr: &DnsRR) -> &str {
+    match &rr.rdata {
+        RData::CNAME(name) => name,
+        _ => unreachable!(),
+    }
 }
 
 fn extract_matching(rrs: &[DnsRR], qtype: u16) -> Vec<DnsRR> {

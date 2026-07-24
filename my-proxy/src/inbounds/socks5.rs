@@ -3,7 +3,7 @@ use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 
-use crate::error::Result;
+use crate::error::{ProxyError, Result};
 use crate::socks5_proto::{Address, Command, ReplyCode, write_reply, handshake, read_request};
 use crate::relay::{self, udp::UdpRelay};
 
@@ -32,7 +32,7 @@ async fn handle_client(mut client_stream: TcpStream, udp_idle_timeout: Duration)
             let addr = request.addr;
             println!("SOCKS5 CONNECT → {addr:?}");
 
-            let server_addr = match addr.resolve().await {
+            let addrs = match addr.resolve_all().await {
                 Ok(a) => a,
                 Err(e) => {
                     println!("DNS 失败: {e:?}");
@@ -41,12 +41,29 @@ async fn handle_client(mut client_stream: TcpStream, udp_idle_timeout: Duration)
                 }
             };
 
-            let mut server_stream = match TcpStream::connect(server_addr).await {
-                Ok(stream) => stream,
-                Err(e) => {
-                    println!("连接失败: {e:?}");
+            let mut server_stream = None;
+            let mut last_err = None;
+            for candidate in &addrs {
+                match TcpStream::connect(candidate).await {
+                    Ok(stream) => {
+                        server_stream = Some(stream);
+                        break;
+                    }
+                    Err(e) => {
+                        last_err = Some(e);
+                    }
+                }
+            }
+
+            let mut server_stream = match server_stream {
+                Some(s) => s,
+                None => {
+                    let io_err = last_err.unwrap_or_else(|| {
+                        std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "所有地址连接失败")
+                    });
+                    println!("连接失败: {io_err:?}");
                     let _ = write_reply(&mut client_stream, ReplyCode::ConnectionRefused, &ZERO_ADDR).await;
-                    return Err(e.into());
+                    return Err(ProxyError::Io(io_err));
                 }
             };
 

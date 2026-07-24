@@ -100,23 +100,27 @@ impl Address {
         }
     }
 
-    pub async fn resolve(&self) -> Result<SocketAddr> {
+    /// Resolve the address, returning all candidates (IPv4 first, then IPv6).
+    pub async fn resolve_all(&self) -> Result<Vec<SocketAddr>> {
         match self {
             Address::Ipv4(ip, port) => {
-                Ok(SocketAddr::new(std::net::IpAddr::V4(*ip), *port))
+                Ok(vec![SocketAddr::new(std::net::IpAddr::V4(*ip), *port)])
             }
             Address::Ipv6(ip, port) => {
-                Ok(SocketAddr::new(std::net::IpAddr::V6(*ip), *port))
+                Ok(vec![SocketAddr::new(std::net::IpAddr::V6(*ip), *port)])
             }
             Address::Domain(domain, port) => {
-                let addr = tokio::net::lookup_host(format!("{}:{}", domain, port))
+                let mut addrs: Vec<SocketAddr> = tokio::net::lookup_host(format!("{}:{}", domain, port))
                     .await?
-                    .next()
-                    .ok_or_else(|| ProxyError::DnsResolutionFailed(domain.clone()))?;
-                Ok(addr)
+                    .collect();
+                if addrs.is_empty() {
+                    return Err(ProxyError::DnsResolutionFailed(domain.clone()));
+                }
+                // Prefer IPv4
+                addrs.sort_by_key(|a| a.is_ipv6());
+                Ok(addrs)
             }
         }
-
     }
 
     pub async fn resolve_ipv4(&self) -> Result<SocketAddr> {
@@ -192,21 +196,31 @@ pub async fn handshake(stream: &mut TcpStream) -> Result<()> {
 }
 
 async fn read_address(stream: &mut TcpStream, atyp: u8) -> Result<Address> {
-    // Build a buffer starting with ATYP + raw address bytes,
+    // Build a buffer matching the SOCKS5 wire format: [ATYP | address | port],
     // then delegate to Address::from_socks5.
-    let extra = match atyp {
-        0x01 => 6,           // 4-byte IPv4 + 2-byte port
+    let buf = match atyp {
+        0x01 => {
+            let mut buf = vec![0x01, 0, 0, 0, 0, 0, 0]; // ATYP + IPv4(4) + Port(2)
+            stream.read_exact(&mut buf[1..]).await?;
+            buf
+        }
         0x03 => {
             let mut len_buf = [0u8; 1];
             stream.read_exact(&mut len_buf).await?;
-            len_buf[0] as usize + 3 // domain-len(1) + domain + port(2)
+            let domain_len = len_buf[0] as usize;
+            let mut buf = vec![0x03, len_buf[0]]; // ATYP + domain_len
+            buf.resize(2 + domain_len + 2, 0);    // + domain + port
+            stream.read_exact(&mut buf[2..]).await?;
+            buf
         }
-        0x04 => 18,          // 16-byte IPv6 + 2-byte port
+        0x04 => {
+            let mut buf = vec![0x04];
+            buf.resize(19, 0); // ATYP + IPv6(16) + Port(2)
+            stream.read_exact(&mut buf[1..]).await?;
+            buf
+        }
         _ => return Err(ProxyError::SocksInvalidAddressType(atyp)),
     };
-    let mut buf = vec![atyp];
-    buf.resize(1 + extra, 0);
-    stream.read_exact(&mut buf[1..]).await?;
     Address::from_socks5(&buf).map(|(a, _)| a)
 }
 

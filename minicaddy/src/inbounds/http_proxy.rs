@@ -53,7 +53,7 @@ pub async fn reverse_proxy(
     };
     println!("upstream → {}", resp.code.unwrap_or(502));
 
-    client.write_all(&buf[..n]).await?;
+    client.write_all(&buf[..header_size]).await?;
     if header_size < n {
         client.write_all(&buf[header_size..n]).await?;
     }

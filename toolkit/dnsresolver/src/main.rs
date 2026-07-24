@@ -51,7 +51,7 @@ fn main() {
         eprintln!("dnsresolver: bind {addr}: {e}");
         process::exit(1);
     });
-    println!("DNS resolver listening on {addr}");
+    eprintln!("DNS resolver listening on {addr}");
 
     let socket = Arc::new(socket);
 
@@ -117,10 +117,11 @@ fn handle_query(data: &[u8], client: std::net::SocketAddr, cache: &DnsCache, soc
 }
 
 fn build_response(query: &DnsMessage, answers: &[DnsRR], rcode: u8) -> DnsMessage {
+    let rd = query.header.flags & 0x0100; // echo Recursion Desired from query
     DnsMessage {
         header: DnsHeader {
             id: query.header.id,
-            flags: 0x8000 | 0x0080 | (rcode as u16),
+            flags: 0x8000 | 0x0080 | rd | (rcode as u16),
             qdcount: query.header.qdcount,
             ancount: answers.len() as u16,
             nscount: 0,
